@@ -5,8 +5,9 @@ extends Node2D
 @export var cruise_speed := 360.0
 @export var max_speed := 920.0
 @export var min_speed := 300.0
-@export_range(1.0, 12.0, 0.1) var tap_angle_impulse_degrees := 6.5
-@export_range(10.0, 70.0, 1.0) var vertical_return_rate_degrees := 34.0
+@export_range(1.0, 12.0, 0.1) var tap_angle_impulse_degrees := 9.5
+@export_range(1.0, 6.0, 0.1) var neutral_blend_angle_degrees := 3.0
+@export_range(10.0, 70.0, 1.0) var vertical_return_rate_degrees := 22.0
 @export_range(30.0, 70.0, 1.0) var max_heading_angle_degrees := 52.0
 @export_range(0.0, 3.0, 0.1) var weak_corridor_follow_rate := 0.0
 @export var radius := 17.0
@@ -22,7 +23,9 @@ var desired_heading_degrees := 0.0
 var lateral_velocity := 0.0
 var steering_error_degrees := 0.0
 var vertical_return_contribution_degrees := 0.0
-var last_tap_impulse_degrees := 0.0
+var last_raw_tap_impulse_degrees := 0.0
+var last_applied_tap_impulse_degrees := 0.0
+var last_tap_blend_factor := 0.0
 var alive := true
 var trail_points: Array[Vector2] = []
 var tumble := 0.0
@@ -41,7 +44,9 @@ func reset_flight(at_position: Vector2, initial_direction: Vector2) -> void:
 	steering_error_degrees = 0.0
 	desired_heading_degrees = rad_to_deg(heading_angle)
 	vertical_return_contribution_degrees = 0.0
-	last_tap_impulse_degrees = 0.0
+	last_raw_tap_impulse_degrees = 0.0
+	last_applied_tap_impulse_degrees = 0.0
+	last_tap_blend_factor = 0.0
 	alive = true
 	tumble = 0.0
 	rotation = velocity.angle() + PI * 0.5
@@ -53,12 +58,18 @@ func apply_tap(target_direction: Vector2) -> void:
 		return
 	correction_direction = target_direction.normalized()
 	var desired_angle := wrapf(WORLD_UP.angle_to(correction_direction), -PI, PI)
-	# Fade correction smoothly through vertical so the tap direction cannot flip
-	# abruptly as a smoothed bend crosses from right to left.
-	var direction_strength := clampf(desired_angle / deg_to_rad(18.0), -1.0, 1.0)
-	var impulse := deg_to_rad(tap_angle_impulse_degrees) * direction_strength
+	# Tap authority is constant outside a tiny neutral blend. Corridor angle picks
+	# the direction, not the magnitude; only +/-3 degrees around vertical fades
+	# smoothly to zero so the sign cannot flip abruptly through a bend.
+	var tap_sign := signf(desired_angle)
+	var neutral_angle := deg_to_rad(maxf(0.1, neutral_blend_angle_degrees))
+	var blend_factor := clampf(absf(desired_angle) / neutral_angle, 0.0, 1.0)
+	var raw_impulse := deg_to_rad(tap_angle_impulse_degrees) * tap_sign
+	var impulse := raw_impulse * blend_factor
 	heading_angle = clampf(heading_angle + impulse, -deg_to_rad(max_heading_angle_degrees), deg_to_rad(max_heading_angle_degrees))
-	last_tap_impulse_degrees = rad_to_deg(impulse)
+	last_raw_tap_impulse_degrees = rad_to_deg(raw_impulse)
+	last_applied_tap_impulse_degrees = rad_to_deg(impulse)
+	last_tap_blend_factor = blend_factor
 	flight_direction = WORLD_UP.rotated(heading_angle)
 	velocity = flight_direction * forward_speed
 

@@ -25,4 +25,4 @@ The hero keeps a world-space heading and a separate forward speed. Without input
 
 Select the `Game`, `Hero`, or `Corridor` nodes in `scenes/game.tscn`. Exported Inspector values cover flight physics, pad boost/reorientation, corridor dimensions and bend limits, grazing, and progression.
 
-Key steering values on `Hero` are `cruise_speed`, `tap_angle_impulse_degrees`, `vertical_return_rate_degrees`, `max_heading_angle_degrees`, and `weak_corridor_follow_rate`. `Corridor` exposes `bend_transition_length`, curve sampling, bend limits, and a sharp-turn width safety bonus. `Game` exposes diminishing Perfect boost effectiveness and graze exit hysteresis.
+Key steering values on `Hero` are `cruise_speed`, `tap_angle_impulse_degrees`, `neutral_blend_angle_degrees`, `vertical_return_rate_degrees`, `max_heading_angle_degrees`, and `weak_corridor_follow_rate`. Taps use full authority outside the small neutral blend around vertical. `Corridor` exposes `bend_transition_length`, curve sampling, bend limits, and a sharp-turn width safety bonus. `Game` exposes diminishing Perfect boost effectiveness and graze exit hysteresis.
