@@ -18,10 +18,18 @@ func setup(world_position: Vector2, direction: Vector2, radius_value: float, per
 	risky = is_risky
 	queue_redraw()
 
-func test_hit(hero_position: Vector2, hero_radius: float) -> int:
+func test_swept_hit(from_position: Vector2, to_position: Vector2, hero_radius: float) -> int:
 	if consumed:
 		return HitQuality.NONE
-	var distance := hero_position.distance_to(position)
+	# Closest point on the frame's movement segment prevents high-speed tunneling
+	# and makes center quality depend on the actual crossed line.
+	var travel := to_position - from_position
+	var travel_length_squared := travel.length_squared()
+	var t := 0.0
+	if travel_length_squared > 0.0001:
+		t = clampf((position - from_position).dot(travel) / travel_length_squared, 0.0, 1.0)
+	var closest := from_position + travel * t
+	var distance := closest.distance_to(position)
 	if distance > pad_radius + hero_radius:
 		return HitQuality.NONE
 	consumed = true
@@ -47,4 +55,3 @@ func _draw() -> void:
 	draw_circle(Vector2.ZERO, perfect_radius, Color(1.0, 0.82, 0.25, 0.28))
 	draw_arc(Vector2.ZERO, perfect_radius, 0.0, TAU, 32, Color("ffe05a"), 4.0, true)
 	draw_line(-ideal_direction * 14.0, ideal_direction * 14.0, Color(1, 1, 1, 0.72), 3.0, true)
-

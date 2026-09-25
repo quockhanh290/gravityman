@@ -3,17 +3,17 @@ extends Node2D
 @export_category("Pads")
 @export var pad_radius := 54.0
 @export var perfect_radius := 18.0
-@export var edge_boost := 28.0
-@export var normal_boost := 58.0
-@export var perfect_boost := 104.0
-@export var perfect_streak_multiplier := 6.0
+@export var edge_boost := 12.0
+@export var normal_boost := 24.0
+@export var perfect_boost := 42.0
+@export_range(0.15, 0.6, 0.01) var perfect_min_effectiveness := 0.32
 @export_range(0.2, 0.35, 0.01) var perfect_trajectory_reorientation := 0.28
 @export_category("Graze")
 @export var graze_distance := 28.0
+@export_range(1.2, 2.5, 0.1) var graze_exit_multiplier := 1.6
 @export var graze_score := 75
-@export var graze_cooldown := 0.7
 @export_category("Progression")
-@export var speed_growth := 1.5
+@export var speed_growth := 0.0
 
 @onready var corridor: CorridorGenerator = $Corridor
 @onready var hero: FlightHero = $Hero
@@ -37,15 +37,21 @@ var grazes := 0
 var graze_chain := 0
 var max_speed_reached := 0.0
 var best_score := 0
-var last_graze_time := -10.0
 var elapsed := 0.0
-var last_pad_quality := "—"
+var last_pad_quality := "-"
 var debug_enabled := false
 var death_disabled := false
 var slow_enabled := false
 var event_tween: Tween
 var camera_punch := Vector2.ZERO
 var crash_freeze := 0.0
+
+# A graze is an encounter, not a timer. It starts on entry, records the closest
+# clearance, and awards once only after a safe exit past the hysteresis threshold.
+var graze_active := false
+var graze_side := 0
+var graze_min_clearance := INF
+var last_graze_quality := "-"
 
 func _ready() -> void:
 	best_score = int(load_best())
@@ -67,10 +73,13 @@ func start_run() -> void:
 	perfect_streak = 0
 	grazes = 0
 	graze_chain = 0
-	max_speed_reached = hero.velocity.length()
-	last_graze_time = -10.0
+	max_speed_reached = hero.forward_speed
+	graze_active = false
+	graze_side = 0
+	graze_min_clearance = INF
+	last_graze_quality = "-"
 	elapsed = 0.0
-	last_pad_quality = "—"
+	last_pad_quality = "-"
 	running = true
 	crash_freeze = 0.0
 	crash_panel.visible = false
@@ -84,7 +93,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if pressed:
 		if running:
 			var sample := corridor.sample(hero.position)
-			var look_ahead := corridor.sample(hero.position + sample.direction * 180.0)
+			var look_ahead := corridor.sample(hero.position + Vector2(sample.direction) * 180.0)
 			hero.apply_tap(look_ahead.direction)
 			camera_punch += -hero.correction_direction * 4.0
 		else:
@@ -96,16 +105,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		debug_enabled = not debug_enabled
 		debug_label.visible = debug_enabled
 		corridor.debug_draw = debug_enabled
+		hero.debug_visuals = debug_enabled
 		corridor.queue_redraw()
+		hero.queue_redraw()
 	if event.is_action_pressed("slow_motion"):
 		slow_enabled = not slow_enabled
 		Engine.time_scale = 0.5 if slow_enabled else 1.0
 	if event.is_action_pressed("disable_death"):
 		death_disabled = not death_disabled
 	if event.is_action_pressed("force_low_speed") and running:
-		hero.velocity = hero.velocity.normalized() * hero.min_speed
+		hero.set_speed(hero.min_speed)
 	if event.is_action_pressed("force_high_speed") and running:
-		hero.velocity = hero.velocity.normalized() * hero.max_speed
+		hero.set_speed(hero.max_speed)
 
 func _physics_process(delta: float) -> void:
 	if crash_freeze > 0.0:
@@ -117,42 +128,85 @@ func _physics_process(delta: float) -> void:
 		return
 
 	elapsed += delta
+	var previous_position := hero.position
 	var sample := corridor.sample(hero.position)
-	var look_ahead := corridor.sample(hero.position + sample.direction * 220.0)
+	var look_ahead := corridor.sample(hero.position + Vector2(sample.direction) * 220.0)
 	hero.step_flight(delta, look_ahead.direction)
+	if speed_growth > 0.0:
+		hero.set_speed(hero.forward_speed + speed_growth * delta)
 	corridor.ensure_ahead(hero.position.y, float(distance_score))
 
 	distance_score = maxi(distance_score, int(maxf(0.0, (160.0 - hero.position.y) / 45.0)))
-	max_speed_reached = maxf(max_speed_reached, hero.velocity.length())
-	_update_collision(sample)
-	_update_pads()
-	_update_camera(delta, look_ahead)
-	_update_ui(sample, look_ahead)
+	max_speed_reached = maxf(max_speed_reached, hero.forward_speed)
+	var current_sample := corridor.sample(hero.position)
+	var current_look_ahead := corridor.sample(hero.position + Vector2(current_sample.direction) * 220.0)
+	var crashed := _update_collision(previous_position, hero.position)
+	if not crashed:
+		_update_pads(previous_position, hero.position)
+	_update_camera(delta, current_look_ahead)
+	_update_ui(current_sample, current_look_ahead)
 
-func _update_collision(sample: Dictionary) -> void:
-	var wall_clearance: float = sample.width * 0.5 - absf(sample.signed_distance) - hero.radius
-	if wall_clearance <= 0.0:
+func _update_collision(from_position: Vector2, to_position: Vector2) -> bool:
+	# Sweep the frame path. At max speed this resolves the movement into samples
+	# smaller than the hero radius, preventing skipped walls at blended corners.
+	var travel_distance := from_position.distance_to(to_position)
+	var steps := maxi(1, int(ceil(travel_distance / maxf(6.0, hero.radius * 0.55))))
+	var minimum_clearance := INF
+	var closest_sample := {}
+	for step in range(steps + 1):
+		var test_position := from_position.lerp(to_position, float(step) / float(steps))
+		var test_sample := corridor.sample(test_position)
+		var clearance: float = test_sample.width * 0.5 - absf(test_sample.signed_distance) - hero.radius
+		if clearance < minimum_clearance:
+			minimum_clearance = clearance
+			closest_sample = test_sample
+
+	if minimum_clearance <= 0.0:
+		graze_active = false
 		if death_disabled:
-			hero.position = sample.center + sample.normal * signf(sample.signed_distance) * (sample.width * 0.5 - hero.radius - 3.0)
-			hero.velocity = hero.velocity.bounce(sample.normal) * 0.65
+			var wall_side := signf(float(closest_sample.signed_distance))
+			hero.position = Vector2(closest_sample.center) + Vector2(closest_sample.normal) * wall_side * (float(closest_sample.width) * 0.5 - hero.radius - 3.0)
+			hero.steering_velocity *= -0.5
 			_show_event("SAVED (NO DEATH)", Color("ff9eb8"), 0.35)
 		else:
-			_crash(sample.normal * signf(sample.signed_distance))
-	elif wall_clearance <= graze_distance and elapsed - last_graze_time >= graze_cooldown:
-		last_graze_time = elapsed
-		grazes += 1
-		graze_chain += 1
-		bonus_score += graze_score * graze_chain
-		_show_event("GRAZE x%d" % graze_chain, Color("ff81af"), 0.45)
-		camera_punch += sample.normal * -signf(sample.signed_distance) * 6.0
-	elif wall_clearance > graze_distance * 2.2:
-		graze_chain = 0
+			_crash(Vector2(closest_sample.normal) * signf(float(closest_sample.signed_distance)))
+		return true
 
-func _update_pads() -> void:
+	if minimum_clearance <= graze_distance:
+		if not graze_active:
+			graze_active = true
+			graze_side = 1 if float(closest_sample.signed_distance) >= 0.0 else -1
+			graze_min_clearance = minimum_clearance
+		else:
+			graze_min_clearance = minf(graze_min_clearance, minimum_clearance)
+	elif graze_active:
+		var end_sample := corridor.sample(to_position)
+		var end_clearance: float = end_sample.width * 0.5 - absf(end_sample.signed_distance) - hero.radius
+		if end_clearance >= graze_distance * graze_exit_multiplier:
+			_award_graze(Vector2(end_sample.normal))
+	return false
+
+func _award_graze(wall_normal: Vector2) -> void:
+	grazes += 1
+	graze_chain += 1
+	bonus_score += graze_score * graze_chain
+	if graze_min_clearance <= graze_distance * 0.22:
+		last_graze_quality = "INSANE"
+	elif graze_min_clearance <= graze_distance * 0.52:
+		last_graze_quality = "VERY CLOSE"
+	else:
+		last_graze_quality = "CLOSE"
+	_show_event("GRAZE x%d" % graze_chain, Color("ff81af"), 0.45)
+	camera_punch += wall_normal * -graze_side * 6.0
+	graze_active = false
+	graze_side = 0
+	graze_min_clearance = INF
+
+func _update_pads(from_position: Vector2, to_position: Vector2) -> void:
 	for pad in pads:
 		if not is_instance_valid(pad) or pad.consumed:
 			continue
-		var quality := pad.test_hit(hero.position, hero.radius)
+		var quality := pad.test_swept_hit(from_position, to_position, hero.radius)
 		if quality == BoostPad.HitQuality.NONE:
 			continue
 		pads_hit += 1
@@ -172,14 +226,20 @@ func _update_pads() -> void:
 				perfect_streak += 1
 				last_pad_quality = "PERFECT"
 				bonus_score += 100 * perfect_streak
-				var boost_value := perfect_boost + perfect_streak_multiplier * perfect_streak
+				var boost_value := calculate_perfect_boost()
 				hero.boost(boost_value, pad.ideal_direction, perfect_trajectory_reorientation)
 				_show_event("PERFECT x%d" % perfect_streak, Color("ffe86a"), 0.62)
 				_flash(Color(0.25, 0.9, 1.0, 0.2))
 				camera_punch += -hero.velocity.normalized() * minf(12.0, 5.0 + perfect_streak)
 
+func calculate_perfect_boost() -> float:
+	# Remaining-headroom scaling produces a long, diminishing acceleration curve.
+	var total_headroom := maxf(1.0, hero.max_speed - hero.cruise_speed)
+	var headroom_ratio := clampf((hero.max_speed - hero.forward_speed) / total_headroom, 0.0, 1.0)
+	return perfect_boost * lerpf(perfect_min_effectiveness, 1.0, sqrt(headroom_ratio))
+
 func _update_camera(delta: float, look_ahead: Dictionary) -> void:
-	var speed_factor := inverse_lerp(hero.min_speed, hero.max_speed, hero.velocity.length())
+	var speed_factor := inverse_lerp(hero.min_speed, hero.max_speed, hero.forward_speed)
 	var target: Vector2 = hero.position + Vector2(look_ahead.direction) * lerpf(285.0, 390.0, speed_factor)
 	camera.position = camera.position.lerp(target, 1.0 - exp(-delta * 5.5))
 	camera_punch = camera_punch.lerp(Vector2.ZERO, 1.0 - exp(-delta * 13.0))
@@ -189,7 +249,7 @@ func _update_camera(delta: float, look_ahead: Dictionary) -> void:
 func _update_ui(sample: Dictionary, desired: Dictionary) -> void:
 	score_label.text = str(distance_score + bonus_score / 100)
 	if debug_enabled:
-		debug_label.text = "F3 DEBUG\nvelocity  %7.1f, %7.1f\nspeed     %7.1f\nangle     %7.1f°\ndesired   %7.1f°\ncorrect   %7.2f, %7.2f\nstreak    %d\npad       %s\nfps       %d\n\nR restart | 1 half speed: %s\n2 no death: %s | 3 low | 4 high" % [hero.velocity.x, hero.velocity.y, hero.velocity.length(), sample.angle, desired.angle, hero.correction_direction.x, hero.correction_direction.y, perfect_streak, last_pad_quality, Engine.get_frames_per_second(), str(slow_enabled), str(death_disabled)]
+		debug_label.text = "F3 DEBUG\nvelocity   %7.1f, %7.1f\nforward    %7.1f\nvel angle  %7.1f deg\ndesired    %7.1f deg\nerror      %+7.1f deg\nlateral    %+7.1f\nsteering   %+7.1f\ntap state  %+7.2f\nstreak     %d\npad        %s\ngraze      %s (%s)\nfps        %d\n\nR restart | 1 half speed: %s\n2 no death: %s | 3 low | 4 high" % [hero.velocity.x, hero.velocity.y, hero.forward_speed, rad_to_deg(hero.velocity.angle()), desired.angle, hero.steering_error_degrees, hero.lateral_velocity, hero.steering_velocity, hero.tap_correction_state, perfect_streak, last_pad_quality, str(graze_active), last_graze_quality, Engine.get_frames_per_second(), str(slow_enabled), str(death_disabled)]
 
 func _spawn_pad(world_position: Vector2, direction: Vector2, difficulty: float, risky: bool) -> void:
 	var pad: BoostPad = pad_scene.instantiate()
@@ -200,6 +260,7 @@ func _spawn_pad(world_position: Vector2, direction: Vector2, difficulty: float, 
 
 func _crash(wall_normal: Vector2) -> void:
 	running = false
+	graze_active = false
 	crash_freeze = 0.065
 	hero.crash()
 	camera_punch = wall_normal * 24.0
@@ -207,7 +268,7 @@ func _crash(wall_normal: Vector2) -> void:
 	var total := distance_score + bonus_score / 100
 	best_score = maxi(best_score, total)
 	save_best(best_score)
-	crash_score.text = "SCORE  %d\nBEST   %d\n\n%d pads  ·  %d perfect  ·  %d grazes\nmax speed  %d" % [total, best_score, pads_hit, perfect_hits, grazes, int(max_speed_reached)]
+	crash_score.text = "SCORE  %d\nBEST   %d\n\n%d pads  -  %d perfect  -  %d grazes\nmax speed  %d" % [total, best_score, pads_hit, perfect_hits, grazes, int(max_speed_reached)]
 	crash_panel.visible = true
 
 func _show_event(message: String, color_value: Color, duration: float) -> void:
