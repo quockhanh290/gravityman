@@ -166,7 +166,7 @@ func _update_collision(from_position: Vector2, to_position: Vector2) -> bool:
 		if death_disabled:
 			var wall_side := signf(float(closest_sample.signed_distance))
 			hero.position = Vector2(closest_sample.center) + Vector2(closest_sample.normal) * wall_side * (float(closest_sample.width) * 0.5 - hero.radius - 3.0)
-			hero.steering_velocity *= -0.5
+			hero.set_flight_direction(hero.velocity.bounce(Vector2(closest_sample.normal)).normalized())
 			_show_event("SAVED (NO DEATH)", Color("ff9eb8"), 0.35)
 		else:
 			_crash(Vector2(closest_sample.normal) * signf(float(closest_sample.signed_distance)))
@@ -249,7 +249,7 @@ func _update_camera(delta: float, look_ahead: Dictionary) -> void:
 func _update_ui(sample: Dictionary, desired: Dictionary) -> void:
 	score_label.text = str(distance_score + bonus_score / 100)
 	if debug_enabled:
-		debug_label.text = "F3 DEBUG\nvelocity   %7.1f, %7.1f\nforward    %7.1f\nvel angle  %7.1f deg\ndesired    %7.1f deg\nerror      %+7.1f deg\nlateral    %+7.1f\nsteering   %+7.1f\ntap state  %+7.2f\nstreak     %d\npad        %s\ngraze      %s (%s)\nfps        %d\n\nR restart | 1 half speed: %s\n2 no death: %s | 3 low | 4 high" % [hero.velocity.x, hero.velocity.y, hero.forward_speed, rad_to_deg(hero.velocity.angle()), desired.angle, hero.steering_error_degrees, hero.lateral_velocity, hero.steering_velocity, hero.tap_correction_state, perfect_streak, last_pad_quality, str(graze_active), last_graze_quality, Engine.get_frames_per_second(), str(slow_enabled), str(death_disabled)]
+		debug_label.text = "F3 DEBUG\nvelocity   %7.1f, %7.1f\nforward    %7.1f\nheading    %+7.1f deg\ndesired    %+7.1f deg\nworld up      0.0 deg\nerror      %+7.1f deg\nreturn     %+7.1f deg/s\ntap impulse %+6.1f deg\nlateral    %+7.1f\nstreak     %d\npad        %s\ngraze      %s (%s)\nfps        %d\n\nR restart | 1 half speed: %s\n2 no death: %s | 3 low | 4 high" % [hero.velocity.x, hero.velocity.y, hero.forward_speed, rad_to_deg(hero.heading_angle), hero.desired_heading_degrees, hero.steering_error_degrees, hero.vertical_return_contribution_degrees, hero.last_tap_impulse_degrees, hero.lateral_velocity, perfect_streak, last_pad_quality, str(graze_active), last_graze_quality, Engine.get_frames_per_second(), str(slow_enabled), str(death_disabled)]
 
 func _spawn_pad(world_position: Vector2, direction: Vector2, difficulty: float, risky: bool) -> void:
 	var pad: BoostPad = pad_scene.instantiate()
