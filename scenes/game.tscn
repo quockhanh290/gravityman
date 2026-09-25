@@ -1,0 +1,165 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource path="res://scripts/game.gd" type="Script" id="1"]
+[ext_resource path="res://scripts/corridor_generator.gd" type="Script" id="2"]
+[ext_resource path="res://scenes/hero.tscn" type="PackedScene" id="3"]
+
+[sub_resource type="Gradient" id="Gradient_bg"]
+colors = PackedColorArray(0.018, 0.027, 0.09, 1, 0.065, 0.16, 0.25, 1)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture_bg"]
+gradient = SubResource("Gradient_bg")
+width = 720
+height = 1280
+fill_from = Vector2(0.5, 1)
+fill_to = Vector2(0.5, 0)
+
+[node name="Game" type="Node2D"]
+script = ExtResource("1")
+
+[node name="Background" type="CanvasLayer" parent="."]
+layer = -10
+
+[node name="Gradient" type="TextureRect" parent="Background"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = SubResource("GradientTexture_bg")
+expand_mode = 1
+
+[node name="Corridor" type="Node2D" parent="."]
+script = ExtResource("2")
+
+[node name="Pads" type="Node2D" parent="."]
+
+[node name="Hero" parent="." instance=ExtResource("3")]
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(0, -140)
+position_smoothing_enabled = false
+
+[node name="UI" type="CanvasLayer" parent="."]
+layer = 20
+
+[node name="Score" type="Label" parent="UI"]
+offset_left = 24.0
+offset_top = 22.0
+offset_right = 250.0
+offset_bottom = 98.0
+theme_override_colors/font_color = Color(0.88, 0.97, 1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.55)
+theme_override_constants/shadow_offset_x = 3
+theme_override_constants/shadow_offset_y = 3
+theme_override_font_sizes/font_size = 48
+text = "0"
+
+[node name="Event" type="Label" parent="UI"]
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 210.0
+offset_bottom = 280.0
+grow_horizontal = 2
+pivot_offset = Vector2(360, 35)
+theme_override_colors/font_color = Color(0.35, 0.9, 1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.75)
+theme_override_constants/shadow_offset_x = 3
+theme_override_constants/shadow_offset_y = 3
+theme_override_font_sizes/font_size = 34
+text = "TAP TO CORRECT"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Debug" type="Label" parent="UI"]
+visible = false
+offset_left = 18.0
+offset_top = 92.0
+offset_right = 445.0
+offset_bottom = 470.0
+theme_override_colors/font_color = Color(0.68, 1, 0.76, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_font_sizes/font_size = 18
+text = "DEBUG"
+
+[node name="CrashPanel" type="Control" parent="UI"]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Shade" type="ColorRect" parent="UI/CrashPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.01, 0.02, 0.07, 0.76)
+mouse_filter = 2
+
+[node name="Title" type="Label" parent="UI/CrashPanel"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 315.0
+offset_bottom = 390.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(1, 0.32, 0.48, 1)
+theme_override_font_sizes/font_size = 50
+text = "IMPACT"
+horizontal_alignment = 1
+
+[node name="Score" type="Label" parent="UI/CrashPanel"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 420.0
+offset_bottom = 635.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(0.86, 0.96, 1, 1)
+theme_override_font_sizes/font_size = 25
+text = "SCORE  0\nBEST   0"
+horizontal_alignment = 1
+
+[node name="Retry" type="Label" parent="UI/CrashPanel"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 760.0
+offset_bottom = 825.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(1, 0.88, 0.35, 1)
+theme_override_font_sizes/font_size = 29
+text = "TAP TO RETRY"
+horizontal_alignment = 1
+
+[node name="Hint" type="Label" parent="UI"]
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -58.0
+offset_bottom = -18.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_colors/font_color = Color(0.65, 0.78, 0.9, 0.75)
+theme_override_font_sizes/font_size = 16
+text = "SPACE / TAP     ·     F3 DEBUG"
+horizontal_alignment = 1
+
+[node name="Flash" type="ColorRect" parent="UI"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.25, 0.9, 1, 0)
+
